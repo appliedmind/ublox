@@ -85,6 +85,18 @@ struct NavVelNed {
     course_heading_accuracy_estimate: u32,
 }
 
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x35, max_payload_len=3080)]
+struct NavSat {
+    i_tow: u32,
+    version: u8,
+    num_svs: u8,
+    reserved: u16,
+    /// Repeated satellite vehicle structure is not supported, so will have to
+    /// decoded by the end user for now.
+    svs: [u8; 0],
+}
+
 /// Navigation Position Velocity Time Solution
 #[ubx_packet_recv]
 #[ubx(class = 1, id = 0x07, fixed_payload_len = 92)]
@@ -523,7 +535,7 @@ struct InfDebug{
 
 
 mod inf {
-	pub(crate) fn convert_to_str(bytes: &[u8]) -> Option<&str> {
+    pub(crate) fn convert_to_str(bytes: &[u8]) -> Option<&str> {
         match core::str::from_utf8(bytes) {
             Ok(msg) => Some(msg),
             Err(_) => None,
@@ -673,6 +685,65 @@ bitflags! {
         const PDWN_ON_SCD = 0x08;
         /// Enable automatic recovery from short circuit state
         const RECOVERY = 0x10;
+    }
+}
+
+/// Time Pulse configuration
+#[ubx_packet_recv_send]
+#[ubx(class = 0x06, id = 0x31, fixed_payload_len = 32)]
+#[derive(Debug)]
+struct CfgTp5 {
+    /// Time pulse selection (0 = TIMEPULSE, 1 = TIMEPULSE2)
+    tp_index: u8,
+    /// Message version (0x00 for this version)
+    version: u8,
+    reserved: [u8; 2],
+    /// Antenna cable delay
+    ant_cable_delay: i16,
+    /// RF group delay
+    rf_group_delay : i16,
+    /// Frequency or period time, depending on setting of bit 'isFreq'
+    freq_period: u32,
+    /// Frequency or period time when locked to GPS time, only used if 'lockedOtherSet' is set
+    freq_period_lock: u32,
+    /// Pulse length or duty cycle, depending on 'isLength'
+    pulse_len_ratio: u32,
+    /// Pulse length or duty cycle when locked to GPS time, only used if 'lockedOtherSet' is set
+    pulse_len_ratio_lock: u32,
+    /// User-configurable time pulse delay in nanoseconds
+    user_config_delay_ns: i32,
+    #[ubx(map_type = CfgTp5Flags)]
+    /// Configuration flags
+    flags: u32,
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, into_raw, rest_reserved)]
+bitflags! {
+    #[derive(Default)]
+    pub struct CfgTp5Flags: u32 {
+        /// If set enable time pulse
+        const ACTIVE = 0x01;
+        /// If set synchronize time pulse to GPS as soon as GPS time is valid,
+        /// otherwise use local clock
+        const LOCK_GPS_FREQ = 0x02;
+        /// If set use 'freqPeriodLock' and 'pulseLenRatioLock' as soon as GPS
+        /// time is valid and 'freqPeriod' and 'pulseLenRatio' if GPS time is
+        /// invalid
+        const LOCKED_OTHER_SET = 0x04;
+        /// If set 'freqPeriodLock' and 'freqPeriod' interpreted as frequency,
+        /// otherwise interpreted as period 
+        const IS_FREQ = 0x08;
+        /// If set 'pulseLenRatioLock' and 'pulseLenRatio' interpreted as pulse
+        /// length, otherwise interpreted as duty cycle
+        const IS_LENGTH = 0x10;
+        /// Align pulse to top of second (period time must be integer fraction
+        /// of 1s)
+        const ALIGN_TO_TOW = 0x20;
+        /// Leading edge polarity
+        const RISING_EDGE = 0x40;
+        /// timegrid to use 0 - UTC / 1 - GPS
+        const TIMEGRID_USE_GPS = 0x80;
     }
 }
 
@@ -1394,6 +1465,41 @@ struct MonVer {
     extension: [u8; 0],
 }
 
+/// Time pulse data
+#[ubx_packet_recv]
+#[ubx(class = 0x0d, id = 0x01, fixed_payload_len = 16)]
+struct TimTp {
+    /// Time pulse time of week according to time base
+    tow_ms: u32,
+    /// Submillisecond part of towMS
+    tow_sub_ms: u32,
+    /// Quantization error of time pulse
+    q_err: i32,
+    /// Time pulse week number according to time base
+    week: u16,
+    /// Flags
+    #[ubx(map_type = TimePulseFlags)]
+    flags: u8,
+    /// Time reference information
+    ref_info: u8,
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Time Pulse Flags
+    pub struct TimePulseFlags: u8 {
+        /// Time base is 0 - GNSS / 1 - UTC
+        const TIME_BASE_UTC = 1;
+        /// UTC is 0 - not available / 1 - available
+        const UTC_AVAIL = 2;
+        /// RAIM information
+        const RAIM = 8;
+        /// Quantization error is 0 - valid / 1 - not valid
+        const QUANT_ERROR_INVALID = 16;
+    }
+}
+
 mod mon_ver {
     pub(crate) fn convert_to_str_unchecked(bytes: &[u8]) -> &str {
         let null_pos = bytes
@@ -1438,6 +1544,7 @@ define_recv_packets!(
         NavPosLlh,
         NavStatus,
         NavDop,
+        NavSat,
         NavPosVelTime,
         NavSolution,
         NavVelNed,
@@ -1450,12 +1557,14 @@ define_recv_packets!(
         CfgPrtUart,
         CfgNav5,
         CfgAnt,
+        CfgTp5,
         InfError,
         InfWarning,
         InfNotice,
         InfTest,
         InfDebug,
         MonVer,
-        MonHw
+        MonHw,
+        TimTp,
     }
 );
