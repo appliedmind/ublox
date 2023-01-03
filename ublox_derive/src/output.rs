@@ -32,6 +32,7 @@ fn generate_debug_impl(pack_name: &str, ref_name: &Ident, pack_descr: &PackDesc)
 pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
     let pack_name = &pack_descr.name;
     let ref_name = format_ident!("{}Ref", pack_descr.name);
+    let owned_name = format_ident!("{}Owned", pack_descr.name);
 
     let mut getters = Vec::with_capacity(pack_descr.fields.len());
     let mut field_validators = Vec::new();
@@ -173,11 +174,22 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
     quote! {
         #[doc = #struct_comment]
         #[doc = "Contains a reference to an underlying buffer, contains accessor methods to retrieve data."]
+        #[derive(Clone)]
         pub struct #ref_name<'a>(&'a [u8]);
-        impl<'a> #ref_name<'a> {
+        impl <'a> #ref_name<'a> {
             #(#getters)*
 
             #validator
+
+            pub fn to_owned(&self) -> #owned_name {
+                #owned_name(self.0.to_vec())
+            }
+        }
+        #[doc = "Owned version"]
+        #[derive(Clone)]
+        pub struct #owned_name(Vec<u8>);
+        impl #owned_name{
+            #(#getters)*
         }
 
         #debug_impl
@@ -559,7 +571,7 @@ pub fn generate_code_for_parse(recv_packs: &RecvPackets) -> TokenStream {
 
     quote! {
         #[doc = "All possible packets enum"]
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         pub enum #union_enum_name<'a> {
             #(#pack_enum_variants),*,
             Unknown(#unknown_var<'a>)

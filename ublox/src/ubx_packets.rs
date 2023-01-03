@@ -82,7 +82,7 @@ pub trait UbxPacketCreator {
 }
 
 /// Packet not supported yet by this crate
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct UbxUnknownPacketRef<'a> {
     pub payload: &'a [u8],
     pub class: u8,
